@@ -1,14 +1,5 @@
 from pydantic import BaseModel
 
-class BlogRequest(BaseModel):
-    topic: str
-    keywords: list[str] = []
-    word_count: int = 800
-
-class BlogResponse(AnalyzeResponse):
-    title: str
-    content: str
-
 class AnalyzeRequest(BaseModel):
     content: str
     keywords: list[str] = []
@@ -21,3 +12,12 @@ class AnalyzeResponse(BaseModel):
     meta_description: str
     grade: str
     suggestions: list[str]
+
+class BlogRequest(BaseModel):
+    topic: str
+    keywords: list[str] = []
+    word_count: int = 800
+
+class BlogResponse(AnalyzeResponse):
+    title: str
+    content: str
