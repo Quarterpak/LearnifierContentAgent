@@ -5,6 +5,7 @@ from openai import OpenAI
 from seo import keyword_stats, readability_score, suggest_meta_description, seo_grade
 from seo_analyzer import analyze_text
 from models import BlogRequest, BlogResponse, AnalyzeRequest, AnalyzeResponse
+from rag.retriever import retrieve_context
 
 # Load environment variables
 load_dotenv()
@@ -17,40 +18,55 @@ app = FastAPI()
 def root():
     return {"message": "AI Content Creator is running 🚀"}
 
-from seo_analyzer import analyze_text
-from models import BlogRequest, BlogResponse
-
 @app.post("/generate", response_model=BlogResponse)
 def generate_content(request: BlogRequest):
-    # --- Blog Generation ---
+    # 🔹 Retrieve relevant context from RAG
+    context = retrieve_context(request.topic)
+
     blog_prompt = f"""
-    Write a professional SEO-optimized blog post about "{request.topic}".
-    Target word count: {request.word_count}.
-    Include these keywords where natural: {", ".join(request.keywords)}.
-    Keep a tone consistent with a company blog: trustworthy, clear, and engaging.
-    """
+You are a professional SEO content writer for Learnifier. 
+Your task is to create a blog post with the following requirements:
+
+- Topic: "{request.topic}"
+- Target word count: {request.word_count}
+- Keywords to include naturally: {", ".join(request.keywords)}
+
+Tone and style: Consistent with Learnifier's past blog posts.
+
+Here are relevant excerpts from Learnifier's existing blogs for reference:
+----------------
+{context}
+----------------
+
+Now, write a new blog post that aligns with the company’s mission, vision, and voice.
+"""
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a professional SEO content writer."},
+            {"role": "system", "content": "You are a professional SEO content writer for Learnifier."},
             {"role": "user", "content": blog_prompt},
         ]
     )
 
     content = response.choices[0].message.content
 
-    # --- Reuse Analyzer ---
+    # 🔹 Reuse SEO analyzer
     analysis = analyze_text(content, request.keywords)
 
     return BlogResponse(
         title=f"{request.topic} - Blog Draft",
         content=content,
-        **analysis  # unpack SEO analysis dict into response
+        raw_context=context,   # optional, for debugging RAG
+        **analysis
     )
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze_content(request: AnalyzeRequest):
     return analyze_text(request.content, request.keywords)
 
-# ---- Run the app ----
+@app.get("/search")
+def search_context(query: str):
+    """Debug endpoint: retrieve context chunks from ChromaDB."""
+    context = retrieve_context(query)
+    return {"query": query, "retrieved_context": context}
