@@ -42,8 +42,10 @@ def chunk_text(text: str, max_tokens: int = 500) -> list[str]:
 
 # --- Ingest all Markdown files ---
 def ingest():
-    blog_dir = "rag/blogs"  # adjust if your blogs live elsewhere
+    blog_dir = "data/blogs"  # adjust if your blogs live elsewhere
     files = glob.glob(os.path.join(blog_dir, "*.md"))
+    print(f"📂 Looking for markdown files in: {os.path.abspath(blog_dir)}")
+    print(f"📄 Found {len(files)} files: {files}")
 
     for file in files:
         with open(file, "r", encoding="utf-8") as f:

@@ -6,6 +6,10 @@
   uvicorn main:app --reload
 
 - Delete old chroma DB folder
+  Mac:
+  rm -rf chroma_store
+
+  Windows:
   Remove-Item -Recurse -Force .\chroma_store
 
 - Ingest blogs
