@@ -6,6 +6,8 @@ from seo import keyword_stats, readability_score, suggest_meta_description, seo_
 from seo_analyzer import analyze_text
 from models import BlogRequest, BlogResponse, AnalyzeRequest, AnalyzeResponse
 from rag.retriever import retrieve_context
+from rag.retriever import collection
+from rag.ingest import embed
 
 # Load environment variables
 load_dotenv()
@@ -68,5 +70,19 @@ def analyze_content(request: AnalyzeRequest):
 @app.get("/search")
 def search_context(query: str):
     """Debug endpoint: retrieve context chunks from ChromaDB."""
-    context = retrieve_context(query)
-    return {"query": query, "retrieved_context": context}
+    results = collection.query(
+        query_embeddings=[embed(query)],
+        n_results=3
+    )
+    return {
+        "query": query,
+        "results": [
+            {
+                "source": meta.get("source"),
+                "chunk": meta.get("chunk"),
+                "text": doc
+            }
+            for doc, meta in zip(results["documents"][0], results["metadatas"][0])
+        ]
+    }
+

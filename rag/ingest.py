@@ -1,7 +1,8 @@
 import os
-import chromadb
-from openai import OpenAI
 from dotenv import load_dotenv
+from openai import OpenAI
+import chromadb
+import glob
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -9,29 +10,59 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="chroma_store")
 collection = chroma_client.get_or_create_collection("learnifier_blogs")
 
-def embed_text(text: str) -> list[float]:
+
+# --- Embedding helper ---
+def embed(text: str) -> list[float]:
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=text
     )
     return response.data[0].embedding
 
-def ingest_blogs(folder="data/blogs"):
-    for filename in os.listdir(folder):
-        if filename.endswith(".txt") or filename.endswith(".md"):
-            path = os.path.join(folder, filename)
-            with open(path, "r", encoding="utf-8") as f:
-                text = f.read()
 
-            embedding = embed_text(text)
+# --- Simple chunking function ---
+def chunk_text(text: str, max_tokens: int = 500) -> list[str]:
+    """
+    Splits text into chunks of ~500 tokens (roughly 350-500 words).
+    """
+    words = text.split()
+    chunks, current = [], []
+
+    for word in words:
+        current.append(word)
+        if len(current) >= max_tokens:
+            chunks.append(" ".join(current))
+            current = []
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return chunks
+
+
+# --- Ingest all Markdown files ---
+def ingest():
+    blog_dir = "rag/blogs"  # adjust if your blogs live elsewhere
+    files = glob.glob(os.path.join(blog_dir, "*.md"))
+
+    for file in files:
+        with open(file, "r", encoding="utf-8") as f:
+            text = f.read()
+
+        chunks = chunk_text(text)
+
+        for i, chunk in enumerate(chunks):
+            embedding = embed(chunk)
 
             collection.add(
-                documents=[text],
+                documents=[chunk],
                 embeddings=[embedding],
-                ids=[filename]
+                metadatas=[{"source": file, "chunk": i}],
+                ids=[f"{os.path.basename(file)}-{i}"]
             )
-            print(f"✅ Ingested {filename}")
+
+        print(f"✅ Ingested {len(chunks)} chunks from {file}")
+
 
 if __name__ == "__main__":
-    ingest_blogs()
-    print("🎉 All blog posts ingested into ChromaDB")
+    ingest()
