@@ -2,6 +2,9 @@
 
 ## Commands
 
+- Activate virtual environment
+  source venv/bin/activate
+
 - Start API
   uvicorn main:app --reload
 
