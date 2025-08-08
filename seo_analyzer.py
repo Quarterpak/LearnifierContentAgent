@@ -6,15 +6,15 @@ from seo import keyword_stats, readability_score, suggest_meta_description, seo_
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-def analyze_text(content: str, keywords: list[str]) -> dict:
+def analyze_text(content: str, keywords: list[str], language: str = "en") -> dict:
     # --- SEO Metrics ---
     keyword_data = keyword_stats(content, keywords)
-    readability = readability_score(content)
-    grade = seo_grade(keyword_data["keyword_coverage"], keyword_data["avg_density"], readability)
+    readability = readability_score(content, language)
+    grade = seo_grade(keyword_data["keyword_coverage"], keyword_data["avg_density"], readability, language)
 
     # --- AI Meta Description ---
     meta_prompt = f"""
-    Write a compelling meta description for this blog post.
+    Write a compelling meta description for this blog post in {language}.
     Requirements:
     - Max 160 characters
     - Include 1–2 of these keywords: {", ".join(keywords)}
@@ -35,6 +35,7 @@ def analyze_text(content: str, keywords: list[str]) -> dict:
     # --- AI Suggestions ---
     suggestion_prompt = f"""
     You are an SEO expert.
+    Blog language: {language}
     Blog draft:
     ---
     {content}
@@ -46,8 +47,9 @@ def analyze_text(content: str, keywords: list[str]) -> dict:
     - Grade: {grade}
 
     Give 3 actionable SEO improvement suggestions in bullet points.
+    Respond in {language}.
     """
-
+    
     suggestions_response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[

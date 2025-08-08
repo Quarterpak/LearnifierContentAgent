@@ -23,11 +23,11 @@ def root():
 @app.post("/generate", response_model=BlogResponse)
 def generate_content(request: BlogRequest):
     # 🔹 Retrieve relevant context from RAG
-    context = retrieve_context(request.topic)
+    context = retrieve_context(request.topic, language=request.language)
 
     blog_prompt = f"""
 You are a professional SEO content writer for Learnifier. 
-Your task is to create a blog post with the following requirements:
+Your task is to write a blog post in **{request.language}** with the following requirements:
 
 - Topic: "{request.topic}"
 - Target word count: {request.word_count}
@@ -65,17 +65,23 @@ Now, write a new blog post that aligns with the company’s mission, vision, and
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze_content(request: AnalyzeRequest):
-    return analyze_text(request.content, request.keywords)
+    return analyze_text(request.content, request.keywords, request.language)
 
 @app.get("/search")
-def search_context(query: str):
-    """Debug endpoint: retrieve context chunks from ChromaDB."""
+def search_context(query: str, language: str = "en"):
+    """Debug endpoint: retrieve context chunks from ChromaDB with language filtering."""
+    from rag.retriever import retrieve_context, embed, collection  # just to be safe
+
+    query_embedding = embed(query)
     results = collection.query(
-        query_embeddings=[embed(query)],
-        n_results=3
+        query_embeddings=[query_embedding],
+        n_results=10,  # you can tweak this number
+        where={"language": language}  # 🔹 filters by metadata language
     )
+
     return {
         "query": query,
+        "language": language,
         "results": [
             {
                 "source": meta.get("source"),
@@ -85,4 +91,5 @@ def search_context(query: str):
             for doc, meta in zip(results["documents"][0], results["metadatas"][0])
         ]
     }
+
 

@@ -17,13 +17,14 @@ def embed(text: str) -> list[float]:
     )
     return response.data[0].embedding
 
-def retrieve_context(query: str, n_results=3) -> str:
+def retrieve_context(query: str, language: str = "en", n_results=3) -> str:
     """Fetch relevant past blog content to use as context"""
     query_embedding = embed(query)  # 🔹 embed with OpenAI
 
     results = collection.query(
         query_embeddings=[query_embedding],  # 🔹 pass embedding, not text
-        n_results=n_results
+        n_results=n_results,
+        where={"language": language}  # 🔹 filter by language
     )
 
     docs = results.get("documents", [[]])[0]

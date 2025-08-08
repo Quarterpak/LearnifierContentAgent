@@ -1,5 +1,5 @@
 ---
-title: '23 Creative Onboarding Ideas Your New Hires Will Love'
+title: 'LMS vs Learning Platform – same same but different'
 author: 'Rebecca Fisk'
 date: '2025-03-11'
 ---

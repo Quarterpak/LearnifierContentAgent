@@ -25,15 +25,25 @@ def keyword_stats(text: str, keywords: List[str]) -> Dict[str, float]:
     }
 
 
-def readability_score(text: str) -> float:
-    """Crude readability: shorter avg sentence length = higher score"""
-    sentences = re.split(r'[.!?]', text)
+def readability_score(text: str, language: str = "en") -> float:
+    """Crude readability: shorter average sentence length = higher score. Language-aware stub."""
+    
+    # Basic sentence splitting (very naive but okay for English & Swedish)
+    if language in {"en", "sv"}:
+        sentences = re.split(r'[.!?]', text)
+    else:
+        # Fallback: split on punctuation used in most Latin-based languages
+        sentences = re.split(r'[.!?]', text)
+
+    # Clean and count
     sentences = [s.strip() for s in sentences if s.strip()]
     words = text.split()
+    
     if not sentences:
         return 0.0
-    avg_len = len(words) / len(sentences)
-    score = max(0, min(100, 100 - avg_len))  # normalized 0–100
+    
+    avg_sentence_length = len(words) / len(sentences)
+    score = max(0, min(100, 100 - avg_sentence_length))  # Normalize to 0–100
     return round(score, 2)
 
 def suggest_meta_description(text: str, max_length: int = 160) -> str:
@@ -41,7 +51,7 @@ def suggest_meta_description(text: str, max_length: int = 160) -> str:
     first_sentence = text.strip().split(".")[0]
     return (first_sentence[:max_length] + "...") if len(first_sentence) > max_length else first_sentence
 
-def seo_grade(coverage: float, avg_density: float, readability: float) -> str:
+def seo_grade(coverage: float, avg_density: float, readability: float, language: str = "en") -> str:
     """
     Return an SEO grade (A/B/C/D) based on keyword coverage, density, and readability.
     - Coverage: want at least 80%

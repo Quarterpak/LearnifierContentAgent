@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
 import glob
+from langdetect import detect
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -10,6 +11,11 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 chroma_client = chromadb.PersistentClient(path="chroma_store")
 collection = chroma_client.get_or_create_collection("learnifier_blogs")
 
+def detect_language(text: str) -> str:
+    try:
+        return detect(text)
+    except:
+        return "unknown"
 
 # --- Embedding helper ---
 def embed(text: str) -> list[float]:
@@ -55,11 +61,12 @@ def ingest():
 
         for i, chunk in enumerate(chunks):
             embedding = embed(chunk)
+            lang = detect_language(chunk)
 
             collection.add(
                 documents=[chunk],
                 embeddings=[embedding],
-                metadatas=[{"source": file, "chunk": i}],
+                metadatas=[{"source": file, "chunk": i, "language": lang}],
                 ids=[f"{os.path.basename(file)}-{i}"]
             )
 
