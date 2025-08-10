@@ -117,25 +117,37 @@ DRAFT TO IMPROVE:
 def analyze_content(request: AnalyzeRequest):
     return analyze_text(request.content, request.keywords, request.language)
 
+from typing import Optional
+
+def _and_filters(*conds):
+    # flatten out Nones
+    conds = [c for c in conds if c]
+    if not conds:
+        return {}
+    if len(conds) == 1:
+        return conds[0]
+    return {"$and": conds}
+
 @app.get("/search")
 def search_context(
     query: str,
     language: str = "en",
     top_k: int = 5,
     source: Optional[str] = None,
+    content_type: Optional[str] = None,   # e.g. "blog" or "blog,site"
+    max_distance: float = 0.95,
     fallback_to_en: bool = True,
 ):
-    """
-    Debug endpoint: retrieve context chunks from ChromaDB with language filtering.
-    - query: search text
-    - language: 'en' | 'sv'
-    - top_k: number of results
-    - source: optional exact-match filter (e.g. 'data/blogs/onboarding-ideas.sv.md')
-    - fallback_to_en: if no results in requested language, try English
-    """
-    where = {"language": language}
-    if source:
-        where["source"] = source
+    # build individual conditions
+    lang_cond = {"language": language}
+    src_cond = {"source": source} if source else None
+
+    type_cond = None
+    if content_type:
+        types = [t.strip() for t in content_type.split(",") if t.strip()]
+        type_cond = {"content_type": types[0]} if len(types) == 1 else {"content_type": {"$in": types}}
+
+    where = _and_filters(lang_cond, src_cond, type_cond)
 
     try:
         q_emb = embed(query)
@@ -146,47 +158,51 @@ def search_context(
             include=["documents", "metadatas", "distances"],
         )
 
-        # Fallback to English if nothing found (and caller allows it)
-        if (not res.get("documents") or not res["documents"][0]) and fallback_to_en and language != "en":
+        # fallback to EN if needed
+        used_language = language
+        docs = res.get("documents", [[]])[0]
+        if (not docs) and fallback_to_en and language != "en":
+            where_fallback = _and_filters({"language": "en"}, src_cond, type_cond)
             res = collection.query(
                 query_embeddings=[q_emb],
                 n_results=top_k,
-                where={"language": "en"},
+                where=where_fallback,
                 include=["documents", "metadatas", "distances"],
             )
             used_language = "en"
-        else:
-            used_language = language
 
-        docs = res.get("documents", [[]])[0]
+        docs  = res.get("documents", [[]])[0]
         metas = res.get("metadatas", [[]])[0]
         dists = res.get("distances", [[]])[0]
 
-        results = [
-            {
-                "source": (metas[i] or {}).get("source"),
-                "chunk": (metas[i] or {}).get("chunk"),
-                "distance": dists[i] if i < len(dists) else None,
-                "text": docs[i],
-            }
-            for i in range(len(docs))
-        ]
+        results = []
+        for doc, meta, dist in zip(docs, metas, dists):
+            if dist is None or dist <= max_distance:
+                results.append({
+                    "source": (meta or {}).get("source"),
+                    "content_type": (meta or {}).get("content_type"),
+                    "language": (meta or {}).get("language"),
+                    "chunk": (meta or {}).get("chunk"),
+                    "distance": dist,
+                    "text": doc,
+                })
 
         return {
             "query": query,
             "language_requested": language,
             "language_used": used_language,
+            "content_type_requested": content_type or "(any)",
             "count": len(results),
             "results": results,
         }
-
     except Exception as e:
-        # avoid 500s; return a structured error for debugging
         return {
             "query": query,
             "language_requested": language,
+            "content_type_requested": content_type or "(any)",
             "error": str(e),
         }
+
 
 @app.post("/regenerate", response_model=BlogResponse)
 def regenerate_content(request: RegenerateRequest):

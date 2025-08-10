@@ -1,4 +1,5 @@
 import os
+import re
 from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
@@ -17,6 +18,22 @@ def detect_language(text: str) -> str:
     except:
         return "unknown"
 
+def detect_content_type(source: str) -> str:
+    """
+    Very simple content type detector based on URL or file path.
+    """
+    s = source.lower()
+    if "/blog" in s:
+        return "blog"
+    elif "/customer" in s or "customer-story" in s:
+        return "customer_story"
+    elif "/event" in s or "/events" in s:
+        return "event"
+    elif "/guide" in s:
+        return "guide"
+    else:
+        return "site"
+
 # --- Embedding helper ---
 def embed(text: str) -> list[float]:
     response = client.embeddings.create(
@@ -24,7 +41,6 @@ def embed(text: str) -> list[float]:
         input=text
     )
     return response.data[0].embedding
-
 
 # --- Simple chunking function ---
 def chunk_text(text: str, max_tokens: int = 500) -> list[str]:
@@ -45,19 +61,32 @@ def chunk_text(text: str, max_tokens: int = 500) -> list[str]:
 
     return chunks
 
-
-# --- Ingest all Markdown files ---
+# --- Ingest all Markdown files from multiple folders ---
 def ingest():
-    blog_dir = "data/blogs"  # adjust if your blogs live elsewhere
-    files = glob.glob(os.path.join(blog_dir, "*.md"))
-    print(f"📂 Looking for markdown files in: {os.path.abspath(blog_dir)}")
-    print(f"📄 Found {len(files)} files: {files}")
+    folders = ["data/site/en", "data/site/sv", "data/blogs"]  # add more if needed
+    all_files = []
 
-    for file in files:
+    for folder in folders:
+        folder_path = os.path.abspath(folder)
+        if os.path.exists(folder_path):
+            md_files = glob.glob(os.path.join(folder_path, "*.md"))
+            all_files.extend(md_files)
+            print(f"📂 Found {len(md_files)} markdown files in {folder_path}")
+        else:
+            print(f"⚠️ Folder not found: {folder_path}")
+
+    print(f"📄 Total files to ingest: {len(all_files)}")
+
+    for file in all_files:
         with open(file, "r", encoding="utf-8") as f:
             text = f.read()
 
         chunks = chunk_text(text)
+
+        # Try to read URL from metadata in file (first few lines starting with 'source:')
+        match = re.search(r"source:\s*(\S+)", text)
+        source_url = match.group(1) if match else file
+        content_type = detect_content_type(source_url)
 
         for i, chunk in enumerate(chunks):
             embedding = embed(chunk)
@@ -66,12 +95,16 @@ def ingest():
             collection.add(
                 documents=[chunk],
                 embeddings=[embedding],
-                metadatas=[{"source": file, "chunk": i, "language": lang}],
+                metadatas=[{
+                    "source": source_url,
+                    "chunk": i,
+                    "language": lang,
+                    "content_type": content_type
+                }],
                 ids=[f"{os.path.basename(file)}-{i}"]
             )
 
-        print(f"✅ Ingested {len(chunks)} chunks from {file}")
-
+        print(f"✅ Ingested {len(chunks)} chunks from {file} ({content_type})")
 
 if __name__ == "__main__":
     ingest()
