@@ -1,110 +1,96 @@
-import os
-import re
+# ingest.py
+import os, re, glob, hashlib
+from typing import List
 from dotenv import load_dotenv
 from openai import OpenAI
 import chromadb
-import glob
 from langdetect import detect
 
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-chroma_client = chromadb.PersistentClient(path="chroma_store")
-collection = chroma_client.get_or_create_collection("learnifier_blogs")
+CHROMA_PATH = os.getenv("CHROMA_PATH", "/tmp/chroma_store")  # /tmp is writable on Cloud Run
+COLLECTION_NAME = os.getenv("COLLECTION_NAME", "learnifier")
 
-def detect_language(text: str) -> str:
+chroma_client = chromadb.PersistentClient(path=CHROMA_PATH)
+collection = chroma_client.get_or_create_collection(COLLECTION_NAME)
+
+def safe_detect_language(text: str) -> str:
     try:
         return detect(text)
-    except:
+    except Exception:
         return "unknown"
 
 def detect_content_type(source: str) -> str:
-    """
-    Very simple content type detector based on URL or file path.
-    """
     s = source.lower()
-    if "/blog" in s:
-        return "blog"
-    elif "/customer" in s or "customer-story" in s:
-        return "customer_story"
-    elif "/event" in s or "/events" in s:
-        return "event"
-    elif "/guide" in s:
-        return "guide"
-    else:
-        return "site"
+    if "/blog" in s: return "blog"
+    if "/customer" in s or "customer-story" in s: return "customer_story"
+    if "/event" in s or "/events" in s: return "event"
+    if "/guide" in s: return "guide"
+    return "site"
 
-# --- Embedding helper ---
-def embed(text: str) -> list[float]:
-    response = client.embeddings.create(
-        model="text-embedding-3-small",
-        input=text
-    )
-    return response.data[0].embedding
+def embed_batch(texts: List[str]) -> List[List[float]]:
+    """Batch embedding for speed."""
+    resp = client.embeddings.create(model="text-embedding-3-small", input=texts)
+    return [item.embedding for item in resp.data]
 
-# --- Simple chunking function ---
-def chunk_text(text: str, max_tokens: int = 500) -> list[str]:
-    """
-    Splits text into chunks of ~500 tokens (roughly 350-500 words).
-    """
+def chunk_text(text: str, max_words: int = 500) -> List[str]:
+    """Heuristic ~500-word chunks (good enough without tiktoken)."""
     words = text.split()
-    chunks, current = [], []
+    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)] or [""]
 
-    for word in words:
-        current.append(word)
-        if len(current) >= max_tokens:
-            chunks.append(" ".join(current))
-            current = []
+def make_id(source: str, idx: int) -> str:
+    """Stable, short IDs; avoids duplicate-id errors."""
+    h = hashlib.md5(f"{source}-{idx}".encode("utf-8")).hexdigest()[:12]
+    return f"{h}-{idx}"
 
-    if current:
-        chunks.append(" ".join(current))
-
-    return chunks
-
-# --- Ingest all Markdown files from multiple folders ---
 def ingest():
-    folders = ["data/site/en", "data/site/sv", "data/blogs"]  # add more if needed
-    all_files = []
+    folders_env = os.getenv("INGEST_FOLDERS")
+    folders = [p.strip() for p in folders_env.split(",")] if folders_env else ["data/site/en", "data/site/sv", "data/blogs"]
 
+    all_files: List[str] = []
     for folder in folders:
         folder_path = os.path.abspath(folder)
         if os.path.exists(folder_path):
-            md_files = glob.glob(os.path.join(folder_path, "*.md"))
-            all_files.extend(md_files)
-            print(f"📂 Found {len(md_files)} markdown files in {folder_path}")
+            files = glob.glob(os.path.join(folder_path, "*.md"))
+            all_files.extend(files)
+            print(f"📂 Found {len(files)} markdown files in {folder_path}")
         else:
             print(f"⚠️ Folder not found: {folder_path}")
 
     print(f"📄 Total files to ingest: {len(all_files)}")
-
     for file in all_files:
         with open(file, "r", encoding="utf-8") as f:
             text = f.read()
 
         chunks = chunk_text(text)
+        m = re.search(r"source:\s*(\S+)", text)
+        source_url = m.group(1) if m else file
+        ctype = detect_content_type(source_url)
+        langs = [safe_detect_language(c) for c in chunks]
+        ids = [make_id(source_url, i) for i in range(len(chunks))]
 
-        # Try to read URL from metadata in file (first few lines starting with 'source:')
-        match = re.search(r"source:\s*(\S+)", text)
-        source_url = match.group(1) if match else file
-        content_type = detect_content_type(source_url)
+        vectors = embed_batch(chunks)
 
-        for i, chunk in enumerate(chunks):
-            embedding = embed(chunk)
-            lang = detect_language(chunk)
+        # Upsert: remove existing IDs before add (Chroma errors on dup IDs)
+        try:
+            collection.delete(ids=ids)
+        except Exception:
+            pass
 
-            collection.add(
-                documents=[chunk],
-                embeddings=[embedding],
-                metadatas=[{
-                    "source": source_url,
-                    "chunk": i,
-                    "language": lang,
-                    "content_type": content_type
-                }],
-                ids=[f"{os.path.basename(file)}-{i}"]
-            )
-
-        print(f"✅ Ingested {len(chunks)} chunks from {file} ({content_type})")
+        collection.add(
+            documents=chunks,
+            embeddings=vectors,
+            metadatas=[{
+                "source": source_url,
+                "chunk": i,
+                "language": langs[i],
+                "content_type": ctype
+            } for i in range(len(chunks))],
+            ids=ids,
+        )
+        print(f"✅ Ingested {len(chunks)} chunks from {file} ({ctype})")
 
 if __name__ == "__main__":
+    print(f"Using CHROMA_PATH={CHROMA_PATH}, collection={COLLECTION_NAME}")
     ingest()
