@@ -41,8 +41,17 @@ def strip_code_fences(text: str) -> str:
 def root():
     return {"message": "AI Content Creator is running 🚀"}
 
+@app.get("/health")
+@app.get("/_health")
+@app.get("/_ah/health")
 @app.get("/healthz")
 def healthz():
+    return {"ok": True}
+
+@app.post("/admin/ingest")
+def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    rag_ingest.ingest()
     return {"ok": True}
 
 @app.post("/generate", response_model=BlogResponse)
@@ -275,9 +284,3 @@ def regenerate_content(request: RegenerateRequest, x_api_key: Optional[str] = He
         content=polished_content,
         **analysis
     )
-
-@app.post("/admin/ingest")
-def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
-    require_key(x_api_key)
-    rag_ingest.ingest()
-    return {"ok": True}
