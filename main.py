@@ -8,6 +8,7 @@ from seo_analyzer import analyze_text
 from models import BlogRequest, BlogResponse, AnalyzeRequest, AnalyzeResponse, RegenerateRequest
 from rag.retriever import retrieve_context, embed as embed_query, collection
 from typing import Optional
+from rag import ingest as rag_ingest
 
 
 # Load environment variables
@@ -229,7 +230,7 @@ def search_context(
 @app.post("/regenerate", response_model=BlogResponse)
 def regenerate_content(request: RegenerateRequest, x_api_key: Optional[str] = Header(default=None)):
     require_key(x_api_key)
-    
+
     """SEO polish for an existing blog draft."""
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"
 
@@ -274,3 +275,9 @@ def regenerate_content(request: RegenerateRequest, x_api_key: Optional[str] = He
         content=polished_content,
         **analysis
     )
+
+@app.post("/admin/ingest")
+def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
+    require_key(x_api_key)
+    rag_ingest.ingest()
+    return {"ok": True}
