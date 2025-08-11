@@ -42,11 +42,12 @@ def root():
     return {"message": "AI Content Creator is running 🚀"}
 
 @app.get("/health")
-@app.get("/_health")
-@app.get("/_ah/health")
-@app.get("/healthz")
 def healthz():
     return {"ok": True}
+
+@app.get("/test")
+def test():
+    return {"message": "Test endpoint is working!"}
 
 @app.post("/admin/ingest")
 def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
