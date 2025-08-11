@@ -1,3 +1,6 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 substitutions:
   _REGION: europe-north1
   _REPO: learnifier
