@@ -47,7 +47,7 @@ def healthz():
 
 @app.get("/test")
 def test():
-    return {"message": "Test endpoint is working!"}
+    return {"message": "Test endpoint is working for ya!"}
 
 @app.post("/admin/ingest")
 def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
