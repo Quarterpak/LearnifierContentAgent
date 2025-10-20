@@ -35,6 +35,7 @@ class TenantManager:
         name: str,
         api_key: Optional[str] = None,
         email: Optional[str] = None,
+        brand_name: Optional[str] = None,
         metadata: Optional[Dict] = None
     ) -> Dict:
         """
@@ -45,6 +46,7 @@ class TenantManager:
             name: Display name of the tenant
             api_key: Optional API key for this tenant
             email: Contact email
+            brand_name: Brand name to use in prompts (defaults to name if not provided)
             metadata: Any additional metadata
         
         Returns:
@@ -56,6 +58,7 @@ class TenantManager:
         tenant_record = {
             "tenant_id": tenant_id,
             "name": name,
+            "brand_name": brand_name or name,  # Default to name if not provided
             "api_key": api_key,
             "email": email,
             "metadata": metadata or {},
@@ -198,6 +201,7 @@ if __name__ == "__main__":
             status_icon = "✅" if tenant.get("status") == "active" else "🔒"
             print(f"{status_icon} {tenant['tenant_id']}")
             print(f"   Name: {tenant.get('name', 'N/A')}")
+            print(f"   Brand Name: {tenant.get('brand_name', tenant.get('name', 'N/A'))}")
             print(f"   Email: {tenant.get('email', 'N/A')}")
             print(f"   API Key: {'***' + tenant['api_key'][-4:] if tenant.get('api_key') else 'N/A'}")
             print()

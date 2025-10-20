@@ -13,8 +13,8 @@ from prompts import (
     blog_generation_prompt,
     polish_prompt,
     regenerate_polish_prompt,
-    SYSTEM_PROMPT_WRITER,
-    SYSTEM_PROMPT_EDITOR
+    get_system_prompt_writer,
+    get_system_prompt_editor
 )
 from tenant_manager import TenantManager
 
@@ -128,10 +128,17 @@ def generate_content(
     if not request.tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id is required")
     
+    # Get tenant info to retrieve brand name
+    tenant = tenant_manager.get_tenant(request.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Tenant '{request.tenant_id}' not found")
+    
+    brand_name = tenant.get("brand_name", tenant.get("name", "your company"))
+    
     # 1) Retrieve same-language context with tenant isolation
     context = retrieve_context(
         request.topic,
-        tenant_id=request.tenant_id,  # KEY: Pass tenant_id
+        tenant_id=request.tenant_id,
         language=request.language
     )
     
@@ -139,7 +146,7 @@ def generate_content(
     if not context and request.language != "en":
         en_context = retrieve_context(
             request.topic,
-            tenant_id=request.tenant_id,  # KEY: Pass tenant_id
+            tenant_id=request.tenant_id,
             language="en"
         )
         if en_context:
@@ -149,7 +156,7 @@ def generate_content(
                 "Translate/adapt tone and content to the requested language."
             )
 
-    # 2) Build prompt
+    # 2) Build prompt with brand name
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"
     blog_prompt = blog_generation_prompt(
         language=request.language,
@@ -157,13 +164,14 @@ def generate_content(
         word_count=request.word_count,
         keywords=kws,
         context=context,
+        brand_name=brand_name,
         fallback_note=fallback_note
     )
 
     gen = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT_WRITER},
+            {"role": "system", "content": get_system_prompt_writer(brand_name)},
             {"role": "user", "content": blog_prompt},
         ],
     )
@@ -174,12 +182,13 @@ def generate_content(
         polish_prompt_text = polish_prompt(
             language=request.language,
             keywords=kws,
-            content=content
+            content=content,
+            brand_name=brand_name
         )
         pol = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT_EDITOR},
+                {"role": "system", "content": get_system_prompt_editor(brand_name)},
                 {"role": "user", "content": polish_prompt_text},
             ],
         )
@@ -313,6 +322,13 @@ def regenerate_content(
     # Validate tenant_id is provided
     if not request.tenant_id:
         raise HTTPException(status_code=400, detail="tenant_id is required")
+    
+    # Get tenant info to retrieve brand name
+    tenant = tenant_manager.get_tenant(request.tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail=f"Tenant '{request.tenant_id}' not found")
+    
+    brand_name = tenant.get("brand_name", tenant.get("name", "your company"))
 
     """SEO polish for an existing blog draft."""
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"
@@ -320,13 +336,14 @@ def regenerate_content(
     polish_prompt_text = regenerate_polish_prompt(
         language=request.language,
         keywords=kws,
-        content=request.content
+        content=request.content,
+        brand_name=brand_name
     )
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT_EDITOR},
+            {"role": "system", "content": get_system_prompt_editor(brand_name)},
             {"role": "user", "content": polish_prompt_text},
         ]
     )
