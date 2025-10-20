@@ -16,6 +16,7 @@ class AnalyzeResponse(BaseModel):
     suggestions: List[str]
 
 class BlogRequest(BaseModel):
+    tenant_id: str  # NEW: Required for tenant isolation
     topic: str
     keywords: List[str] = []
     word_count: int = 800
@@ -27,6 +28,7 @@ class BlogResponse(AnalyzeResponse):
     content: str
 
 class RegenerateRequest(BaseModel):
+    tenant_id: str  # NEW: Required for tenant isolation
     topic: str
     content: str                    
     keywords: List[str] = []

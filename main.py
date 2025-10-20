@@ -6,7 +6,7 @@ from openai import OpenAI
 from seo import keyword_stats, readability_score, suggest_meta_description, seo_grade
 from seo_analyzer import analyze_text
 from models import BlogRequest, BlogResponse, AnalyzeRequest, AnalyzeResponse, RegenerateRequest
-from rag.retriever import retrieve_context, embed as embed_query, collection
+from rag.retriever import retrieve_context, embed as embed_query, collection, get_tenant_stats
 from typing import Optional
 from rag import ingest as rag_ingest
 from prompts import (
@@ -16,6 +16,10 @@ from prompts import (
     SYSTEM_PROMPT_WRITER,
     SYSTEM_PROMPT_EDITOR
 )
+from tenant_manager import TenantManager
+
+# Initialize tenant manager
+tenant_manager = TenantManager()
 
 
 # Load environment variables
@@ -52,20 +56,92 @@ def root():
 def healthz():
     return {"ok": True}
 
-@app.post("/admin/ingest")
-def admin_ingest(x_api_key: Optional[str] = Header(default=None)):
+@app.get("/admin/tenants")
+def list_tenants(x_api_key: Optional[str] = Header(default=None)):
+    """List all registered tenants."""
     require_key(x_api_key)
-    rag_ingest.ingest()
-    return {"ok": True}
+    return {
+        "tenants": tenant_manager.list_tenants(),
+        "count": len(tenant_manager.list_tenants())
+    }
+
+@app.post("/admin/tenant/register")
+def register_tenant(
+    tenant_id: str,
+    name: str,
+    api_key: Optional[str] = None,
+    email: Optional[str] = None,
+    x_api_key: Optional[str] = Header(default=None)
+):
+    """Register a new tenant."""
+    require_key(x_api_key)
+    tenant = tenant_manager.register_tenant(tenant_id, name, api_key, email)
+    return {"ok": True, "tenant": tenant}
+
+@app.get("/admin/tenant/sync")
+def sync_tenants(
+    auto_register: bool = False,
+    x_api_key: Optional[str] = Header(default=None)
+):
+    """Sync tenant registry with filesystem."""
+    require_key(x_api_key)
+    result = tenant_manager.sync_with_filesystem(auto_register=auto_register)
+    return {"ok": True, **result}
+
+@app.post("/admin/ingest")
+def admin_ingest(
+    tenant_id: Optional[str] = None,
+    x_api_key: Optional[str] = Header(default=None)
+):
+    """
+    Ingest documents for one or all tenants.
+    If tenant_id is provided, only ingest that tenant's data.
+    """
+    require_key(x_api_key)
+    rag_ingest.ingest(tenant_id=tenant_id)
+    return {
+        "ok": True,
+        "message": f"Ingestion completed for {'tenant: ' + tenant_id if tenant_id else 'all tenants'}"
+    }
+
+@app.delete("/admin/tenant/{tenant_id}")
+def delete_tenant(tenant_id: str, x_api_key: Optional[str] = Header(default=None)):
+    """Delete all data for a specific tenant."""
+    require_key(x_api_key)
+    rag_ingest.delete_tenant_data(tenant_id)
+    return {"ok": True, "message": f"Tenant '{tenant_id}' data deleted"}
+
+@app.get("/admin/tenant/{tenant_id}/stats")
+def tenant_stats(tenant_id: str, x_api_key: Optional[str] = Header(default=None)):
+    """Get statistics about a tenant's data."""
+    require_key(x_api_key)
+    return get_tenant_stats(tenant_id)
 
 @app.post("/generate", response_model=BlogResponse)
-def generate_content(request: BlogRequest, x_api_key: Optional[str] = Header(default=None)):
+def generate_content(
+    request: BlogRequest,
+    x_api_key: Optional[str] = Header(default=None)
+):
     require_key(x_api_key)
-    # 1) Retrieve same-language context; fallback to EN if empty
-    context = retrieve_context(request.topic, language=request.language)
+    
+    # Validate tenant_id is provided
+    if not request.tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
+    
+    # 1) Retrieve same-language context with tenant isolation
+    context = retrieve_context(
+        request.topic,
+        tenant_id=request.tenant_id,  # KEY: Pass tenant_id
+        language=request.language
+    )
+    
     fallback_note = ""
     if not context and request.language != "en":
-        en_context = retrieve_context(request.topic, language="en")
+        en_context = retrieve_context(
+            request.topic,
+            tenant_id=request.tenant_id,  # KEY: Pass tenant_id
+            language="en"
+        )
         if en_context:
             context = en_context
             fallback_note = (
@@ -115,7 +191,6 @@ def generate_content(request: BlogRequest, x_api_key: Optional[str] = Header(def
     return BlogResponse(
         title=f"{request.topic} - Blog Draft",
         content=content,
-        # raw_context=context,  # keep for debugging
         **analysis
     )
 
@@ -124,42 +199,54 @@ def analyze_content(request: AnalyzeRequest, x_api_key: Optional[str] = Header(d
     require_key(x_api_key)
     return analyze_text(request.content, request.keywords, request.language)
 
-from typing import Optional
-
-def _and_filters(*conds):
-    # flatten out Nones
-    conds = [c for c in conds if c]
-    if not conds:
-        return {}
-    if len(conds) == 1:
-        return conds[0]
-    return {"$and": conds}
+def _build_search_where(tenant_id, language, source=None, content_type=None):
+    """Build where clause for search endpoint using ChromaDB's $and operator."""
+    conditions = [
+        {"tenant_id": tenant_id},
+        {"language": language}
+    ]
+    
+    if source:
+        conditions.append({"source": source})
+    
+    if content_type:
+        types = [t.strip() for t in content_type.split(",") if t.strip()]
+        if len(types) == 1:
+            conditions.append({"content_type": types[0]})
+        else:
+            conditions.append({"content_type": {"$in": types}})
+    
+    # If only one condition, return it directly
+    if len(conditions) == 1:
+        return conditions[0]
+    
+    # Otherwise, use $and operator
+    return {"$and": conditions}
 
 @app.get("/search")
 def search_context(
     query: str,
+    tenant_id: str,  # NEW: Required parameter
     language: str = "en",
     top_k: int = 5,
     source: Optional[str] = None,
-    content_type: Optional[str] = None,   # e.g. "blog" or "blog,site"
+    content_type: Optional[str] = None,
     max_distance: float = 0.95,
     fallback_to_en: bool = True,
     x_api_key: Optional[str] = Header(default=None)
 ):
     require_key(x_api_key)
-    # build individual conditions
-    lang_cond = {"language": language}
-    src_cond = {"source": source} if source else None
-
-    type_cond = None
-    if content_type:
-        types = [t.strip() for t in content_type.split(",") if t.strip()]
-        type_cond = {"content_type": types[0]} if len(types) == 1 else {"content_type": {"$in": types}}
-
-    where = _and_filters(lang_cond, src_cond, type_cond)
-
+    
+    # Validate tenant_id
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
+    
     try:
         q_emb = embed_query(query)
+        
+        # Build where clause for primary language
+        where = _build_search_where(tenant_id, language, source, content_type)
+        
         res = collection.query(
             query_embeddings=[q_emb],
             n_results=top_k,
@@ -167,11 +254,11 @@ def search_context(
             include=["documents", "metadatas", "distances"],
         )
 
-        # fallback to EN if needed
+        # fallback to EN if needed (still within same tenant)
         used_language = language
         docs = res.get("documents", [[]])[0]
         if (not docs) and fallback_to_en and language != "en":
-            where_fallback = _and_filters({"language": "en"}, src_cond, type_cond)
+            where_fallback = _build_search_where(tenant_id, "en", source, content_type)
             res = collection.query(
                 query_embeddings=[q_emb],
                 n_results=top_k,
@@ -188,6 +275,7 @@ def search_context(
         for doc, meta, dist in zip(docs, metas, dists):
             if dist is None or dist <= max_distance:
                 results.append({
+                    "tenant_id": (meta or {}).get("tenant_id"),
                     "source": (meta or {}).get("source"),
                     "content_type": (meta or {}).get("content_type"),
                     "language": (meta or {}).get("language"),
@@ -198,6 +286,7 @@ def search_context(
 
         return {
             "query": query,
+            "tenant_id": tenant_id,
             "language_requested": language,
             "language_used": used_language,
             "content_type_requested": content_type or "(any)",
@@ -207,6 +296,7 @@ def search_context(
     except Exception as e:
         return {
             "query": query,
+            "tenant_id": tenant_id,
             "language_requested": language,
             "content_type_requested": content_type or "(any)",
             "error": str(e),
@@ -214,8 +304,15 @@ def search_context(
 
 
 @app.post("/regenerate", response_model=BlogResponse)
-def regenerate_content(request: RegenerateRequest, x_api_key: Optional[str] = Header(default=None)):
+def regenerate_content(
+    request: RegenerateRequest,
+    x_api_key: Optional[str] = Header(default=None)
+):
     require_key(x_api_key)
+    
+    # Validate tenant_id is provided
+    if not request.tenant_id:
+        raise HTTPException(status_code=400, detail="tenant_id is required")
 
     """SEO polish for an existing blog draft."""
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"

@@ -1,0 +1,10 @@
+{
+  "learnifier": {
+    "tenant_id": "learnifier",
+    "name": "Learnifier",
+    "api_key": "learnifier_api_key",
+    "email": "contact@learnifier.com",
+    "metadata": {},
+    "status": "active"
+  }
+}
