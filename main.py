@@ -9,6 +9,13 @@ from models import BlogRequest, BlogResponse, AnalyzeRequest, AnalyzeResponse, R
 from rag.retriever import retrieve_context, embed as embed_query, collection
 from typing import Optional
 from rag import ingest as rag_ingest
+from prompts import (
+    blog_generation_prompt,
+    polish_prompt,
+    regenerate_polish_prompt,
+    SYSTEM_PROMPT_WRITER,
+    SYSTEM_PROMPT_EDITOR
+)
 
 
 # Load environment variables
@@ -68,30 +75,19 @@ def generate_content(request: BlogRequest, x_api_key: Optional[str] = Header(def
 
     # 2) Build prompt
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"
-    blog_prompt = f"""
-You are a professional SEO content writer for Learnifier.
-
-Write the blog in: **{request.language}**.
-Topic: "{request.topic}"
-Target word count: {request.word_count}
-Keywords to include naturally: {kws}
-
-Tone & style: match Learnifier’s brand voice based on the reference excerpts below.
-Use Markdown with H2/H3 headings, short paragraphs, and scannable structure.
-
-Reference excerpts (same-language if available){fallback_note}:
-----------------
-{context}
-----------------
-
-Now write a fresh post that aligns with Learnifier’s mission, vision, and voice.
-Do not copy excerpts verbatim; synthesize and expand with original phrasing.
-"""
+    blog_prompt = blog_generation_prompt(
+        language=request.language,
+        topic=request.topic,
+        word_count=request.word_count,
+        keywords=kws,
+        context=context,
+        fallback_note=fallback_note
+    )
 
     gen = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a precise, on-brand SEO writer for Learnifier."},
+            {"role": "system", "content": SYSTEM_PROMPT_WRITER},
             {"role": "user", "content": blog_prompt},
         ],
     )
@@ -99,32 +95,16 @@ Do not copy excerpts verbatim; synthesize and expand with original phrasing.
 
     # 3) Optional polish pass
     if request.polish:
-        polish_prompt = f"""
-You are a professional SEO content editor for Learnifier.
-
-Language: {request.language}
-Keywords: {kws}
-
-TASK:
-- Keep the meaning, structure, and tone of the draft.
-- Ensure each keyword appears 2–3 times naturally.
-- Put the primary keyword in the H1 and at least one H2.
-- Keep Learnifier's tone: clear, warm, solution-oriented, no jargon.
-- Avoid keyword stuffing; vary phrasing.
-- Add one internal link placeholder ([Relaterad artikel: Titel](URL) or [Related article: Title](URL)).
-- Add a strong CTA aimed at HR/L&D decision-makers.
-- Output valid Markdown only.
-
-DRAFT TO IMPROVE:
-----------------
-{content}
-----------------
-"""
+        polish_prompt_text = polish_prompt(
+            language=request.language,
+            keywords=kws,
+            content=content
+        )
         pol = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a professional SEO content editor for Learnifier."},
-                {"role": "user", "content": polish_prompt},
+                {"role": "system", "content": SYSTEM_PROMPT_EDITOR},
+                {"role": "user", "content": polish_prompt_text},
             ],
         )
         content = strip_code_fences(pol.choices[0].message.content)
@@ -135,7 +115,7 @@ DRAFT TO IMPROVE:
     return BlogResponse(
         title=f"{request.topic} - Blog Draft",
         content=content,
-        raw_context=context,  # keep for debugging
+        # raw_context=context,  # keep for debugging
         **analysis
     )
 
@@ -240,34 +220,17 @@ def regenerate_content(request: RegenerateRequest, x_api_key: Optional[str] = He
     """SEO polish for an existing blog draft."""
     kws = ", ".join(request.keywords) if request.keywords else "(none provided)"
 
-    polish_prompt = f"""
-    You are a professional SEO content editor for Learnifier.
-
-    Language: {request.language}
-    Keywords: {kws}
-
-    TASK:
-    - Keep the meaning, structure, and tone of the provided draft.
-    - Ensure each keyword appears 2–3 times naturally.
-    - Put the primary keyword in the H1 and at least one H2 (pick the most important one from the list).
-    - Keep Learnifier's tone: clear, warm, solution-oriented, no jargon.
-    - Avoid keyword stuffing and repetition; vary phrasing.
-    - Add one internal link placeholder to a related Learnifier blog (format: [Relaterad artikel: Titel](URL)).
-    - Add a strong CTA at the end aimed at HR/L&D decision-makers.
-    - Maintain fluent and natural writing in {request.language}.
-    - Output valid Markdown only.
-
-    DRAFT TO IMPROVE:
-    ----------------
-    {request.content}
-    ----------------
-    """
+    polish_prompt_text = regenerate_polish_prompt(
+        language=request.language,
+        keywords=kws,
+        content=request.content
+    )
 
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a professional SEO content editor for Learnifier."},
-            {"role": "user", "content": polish_prompt},
+            {"role": "system", "content": SYSTEM_PROMPT_EDITOR},
+            {"role": "user", "content": polish_prompt_text},
         ]
     )
 
