@@ -46,7 +46,8 @@ def make_id(source: str, idx: int) -> str:
 
 def ingest():
     folders_env = os.getenv("INGEST_FOLDERS")
-    folders = [p.strip() for p in folders_env.split(",")] if folders_env else ["data/site/en", "data/site/sv", "data/blogs"]
+    # folders = [p.strip() for p in folders_env.split(",")] if folders_env else ["data/site/en", "data/site/sv", "data/blogs"]
+    folders = [p.strip() for p in folders_env.split(",")] if folders_env else ["data/learnifier_blog_posts_sv"]
 
     all_files: List[str] = []
     for folder in folders:

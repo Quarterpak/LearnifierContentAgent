@@ -2,27 +2,46 @@
 
 ## Commands
 
-- Activate virtual environment
-  source venv/bin/activate
+### Windows
 
-- Start API
-  uvicorn main:app --reload
+-   Create Virtual Environment
+    python -m venv venv
 
-- Delete old chroma DB folder
-  Mac:
-  rm -rf chroma_store
+-   Activate Virtual Environment
+    .\venv\Scripts\Activate.ps1
 
-  Windows:
-  Remove-Item -Recurse -Force .\chroma_store
+-   Deactivate Virtual Environment
+    deactivate
 
-  # Ingest blogs
+-   Install Packages
+    pip install -r requirements.txt
 
-  python rag/ingest.py
+-   Start API
+    uvicorn main:app --reload
 
-  # build the image
+-   Delete old chroma DB folder
+    Remove-Item -Recurse -Force .\chroma_store
 
-  docker build -t learnifier-agent:latest .
+### Macintosh
 
-  # run it, load env vars, and expose port
+-   Activate virtual environment
+    source venv/bin/activate
 
-  docker run --rm -p 8080:8080 --env-file .env learnifier-agent:latest
+-   Start API
+    uvicorn main:app --reload
+
+-   Delete old chroma DB folder
+    Mac:
+    rm -rf chroma_store
+
+## Ingest blogs
+
+python rag/ingest.py
+
+## Docker
+
+-   build the image
+    docker build -t learnifier-agent:latest .
+
+-   run it, load env vars, and expose port
+    docker run --rm -p 8080:8080 --env-file .env learnifier-agent:latest
