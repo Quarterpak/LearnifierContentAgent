@@ -7,5 +7,14 @@
     "email": "contact@learnifier.com",
     "metadata": {},
     "status": "active"
+  },
+  "korvfestivalen": {
+    "tenant_id": "korvfestivalen",
+    "name": "Korvfestivalen",
+    "brand_name": "Korvfestivalen",
+    "api_key": "korvfestivalen_api_key",
+    "email": "contact@korvfestivalen.com",
+    "metadata": {},
+    "status": "active"
   }
 }

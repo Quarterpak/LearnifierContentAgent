@@ -15,5 +15,8 @@ python tenant_manager.py register newcompany "New Company AB" "" "contact@newcom
 
 ## 4. Ingest the data
 
-python ingest.py newcompany
+python rag/ingest.py newcompany
 
+--------------------------------------
+
+Done! 🎉
